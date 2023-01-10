@@ -1,5 +1,12 @@
 # Speed of Sound Experiment
 
+## Requirements
+1. Ensure the latest version of [Python](https://www.python.org/downloads/) is installed
+2. From the command line, pip install pyserial to allow serial communication with the controller
+```
+py -m pip install pyserial
+```
+
 ## Installation
 1. First update the Raspberry Pi Pico's MicroPython firmware to the latest verion, follow [this](https://www.raspberrypi.com/documentation/microcontrollers/micropython.html) guide.
 2. Install [Thonny](https://thonny.org/) to allow you to upload files to the Pico.
