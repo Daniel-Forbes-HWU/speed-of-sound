@@ -1,14 +1,17 @@
 def run_speed_of_sound(speaker_pin:int, microphone_pin:int, led_pin:int, sample_delay_ms:int=50):
-    from machine import Pin
+    from machine import Pin, PWM
     from utime import sleep_ms, ticks_cpu, ticks_diff 
     
+    # Params
+    LED_BRIGHTNESS = 0.05  # LED Duty cycle
+
     # Initialise speaker and microphone pins
     speaker = Pin(speaker_pin, Pin.OUT, Pin.PULL_DOWN)
     microphone = Pin(microphone_pin, Pin.IN, Pin.PULL_UP)
-    led = Pin(led_pin, Pin.IN, Pin.PULL_UP)
+    led = PWM(Pin(led_pin, Pin.OUT, Pin.PULL_UP))
 
-    # Turn on status led
-    led.on()
+    # Turn on status led - PWM
+    led.duty_u16(int(65535*LED_BRIGHTNESS))
 
     def wait_for_falling(pin:Pin) -> int:
         # TODO add timeout
