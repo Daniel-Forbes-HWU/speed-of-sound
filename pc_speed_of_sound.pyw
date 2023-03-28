@@ -1,6 +1,7 @@
 import csv
 import datetime
 import os
+from typing import Literal
 import tkinter as tk
 import tkinter.filedialog as tkfd
 import tkinter.messagebox as tkmb
@@ -8,7 +9,6 @@ import tkinter.ttk as ttk
 
 import serial
 from serial.tools import list_ports
-
 
 def find_pico_com() -> str:
     """Returns the com port str for the device with vendor id 11914 (assumed to be the same for all raspberry pi picos).\n
@@ -48,8 +48,11 @@ class SpeedOfSoundGUI:
         self.root.resizable(False, False)  # Disable resizing
 
         # Key bindings
-        self.root.bind('<Return>', lambda _: self.measure(int(self.repetitions_var.get()), self.distance_var.get()))
+        self.root.bind('<Return>', lambda _: self.measure(int(self.repetitions_var.get()), self.distance_var.get(), self.temperature_var.get()))
         self.root.bind("<Delete>", lambda _: self.delete_selected_data())
+
+        # Close behaviour
+        self.root.protocol("WM_DELETE_WINDOW", self.ask_close)
 
         self.create_gui_elements()
 
@@ -67,20 +70,36 @@ class SpeedOfSoundGUI:
         self.distance_entry.grid(column=0, row=1)
         self.distance_entry.bind("<FocusIn>", lambda _: self.distance_entry.delete(0, 19))
         
-        ttk.Separator(self.control_frame, orient='horizontal').grid(row=2, padx=5, pady=10, sticky="nsew")
+        # Temperature entry box
+        ttk.Label(self.control_frame, text="Temperature (°C):").grid(column=0, row=2)
+        self.default_temperature_text:str = "Enter Temperature Here"
+        self.temperature_var = tk.StringVar(self.control_frame, self.default_temperature_text)
+        self.temperature_entry = ttk.Entry(self.control_frame, textvariable=self.temperature_var)
+        self.temperature_entry.grid(column=0, row=3)
+        self.temperature_entry.bind("<FocusIn>", lambda _: self.temperature_entry.delete(0, 22))
+
+        ttk.Separator(self.control_frame, orient='horizontal').grid(row=4, padx=5, pady=10, sticky="nsew")
 
         # Repetitions entry
-        ttk.Label(self.control_frame, text="Repetitions:").grid(column=0, row=3)
+        ttk.Label(self.control_frame, text="Repetitions:").grid(column=0, row=5)
         self.repetitions_var = tk.StringVar(self.control_frame, "5")
         self.repetitions_entry = ttk.Spinbox(self.control_frame, from_=1, to=50, wrap=True, textvariable=self.repetitions_var)
-        self.repetitions_entry.grid(column=0, row=4, sticky="nsew")
+        self.repetitions_entry.grid(column=0, row=6, sticky="nsew")
 
         # Control buttons
-        self.measure_button = ttk.Button(self.control_frame, text="Measure", command=lambda:self.measure(int(self.repetitions_var.get()), self.distance_var.get()))
-        self.measure_button.grid(column=0, row=5, sticky="nsew")
+        self.measure_button = ttk.Button(
+            self.control_frame,
+            text="Measure",
+            command=lambda:self.measure(
+                int(self.repetitions_var.get()),
+                self.distance_var.get(),
+                self.temperature_var.get()
+            )
+        )
+        self.measure_button.grid(column=0, row=7, sticky="nsew")
 
         self.reconnect_button = ttk.Button(self.control_frame, text="Reconnect", command=self.connect)
-        self.reconnect_button.grid(column=0, row=6, sticky="nsew")
+        self.reconnect_button.grid(column=0, row=8, sticky="nsew")
         #########################################
 
         # Data Frame ############################
@@ -88,12 +107,13 @@ class SpeedOfSoundGUI:
         self.data_frame.grid(column=1, row=0, sticky="nsew", padx=10, pady=10)
 
         # Data - Scrollable
-        columns = ('#1', '#2')
+        columns = ('#1', '#2', '#3')
         self.data_view = ttk.Treeview(self.data_frame, columns=columns, show='headings')
         
         # Name columns
-        self.data_view.heading('#1', text='Distance (cm)')
-        self.data_view.heading('#2', text='Time (us)')
+        self.data_view.heading('#1', text='Temperature (°C)')
+        self.data_view.heading('#2', text='Distance (cm)')
+        self.data_view.heading('#3', text='Time (us)')
         
         # Place treeview in results window
         scrollbar = ttk.Scrollbar(self.data_frame, orient=tk.VERTICAL, command=self.data_view.yview)
@@ -113,9 +133,12 @@ class SpeedOfSoundGUI:
         self.delete_data_button = ttk.Button(self.data_frame, text="Delete Selection", command=self.delete_selected_data)
         self.delete_data_button.pack(side=tk.BOTTOM)
 
+        # Check for if current data has been saved
+        self.data_saved: bool = True
+
         #########################################
 
-    def measure(self, repetitions:int=1, label:str="") -> list[int]:
+    def measure(self, repetitions:int=1, distance_label:str="", temperature_label:str="") -> list[int]:
         """Instructs the pico to measure the time taken (in us) for a sound pressure wave from a speaker
         to travel to a microphone.\n
         Repetitions is the number of times to repeat the measurement.\n"""
@@ -141,14 +164,20 @@ class SpeedOfSoundGUI:
             reads += 1
 
         # Cleanup response
-        if label == self.default_distance_text:
-            label = "Un-Labeled"
+        if distance_label == self.default_distance_text:
+            distance_label = "Un-Labeled"
+        if temperature_label == self.default_temperature_text:
+            temperature_label = "Un-Labeled"
         times = [int(resp.decode("utf-8").strip("\r\n")) for resp in response[1:]]
 
         # Add data to dataset
         for time in times:
-            self.data_view.insert("", "end", values=(label, time))
-        print(f"{label} cm: \n",times)
+            self.data_view.insert("", "end", values=(temperature_label, distance_label, time))
+        print(f"{temperature_label} °C, {distance_label} cm: \n",times)
+
+        # Update saved check
+        self.data_saved = False
+
         return times
 
     def save_data(self):
@@ -163,13 +192,17 @@ class SpeedOfSoundGUI:
         default_filename = f"{timetag}_speed_of_sound"
 
         # Let user select save location
-        filename = tkfd.asksaveasfilename(
+        filename: str = tkfd.asksaveasfilename(
             parent=self.root, 
             initialdir=desktop, 
             defaultextension=".csv", 
             initialfile=default_filename,
             filetypes=[("csv", "*.csv")]
             )
+        if filename == "":
+            print("No filename selected")
+            tkmb.showerror("No filename", "No filename given...")
+            return
         print(f"Saving as: \n{filename}")
 
         # Convert data for saving
@@ -178,13 +211,15 @@ class SpeedOfSoundGUI:
         try:  # Try to save
             with open(filename, "w", newline="") as f:
                 writer = csv.writer(f, delimiter=",")  # Create csv writer
-                writer.writerow(("Distance (cm)", "Time Taken (us)"))  # Write header
+                writer.writerow(("Temperature (°C)", "Distance (cm)", "Time Taken (us)"))  # Write header
                 [writer.writerow(row) for row in data]  # Write data
 
         except Exception as exc:
             tkmb.showerror("Failed to save", f"Failed to save file to {filename}. Please try again.")
             raise exc
 
+        self.data_saved = True
+        
         print(f"Saved successfully")
         tkmb.showinfo("Saved Successfully!", f"Saved successfully to: \n{filename}")
 
@@ -196,8 +231,16 @@ class SpeedOfSoundGUI:
 
     def clear_data(self):
         """Deletes all data entries in the program."""
+        response: Literal["yes","no"] = tkmb.askquestion("Are you sure?", "Do you really want to clear the data?")
+        if response == "no":
+            return
+
+        # Clear all data from data_view
         for item in self.data_view.get_children():
             self.data_view.delete(item)
+        
+        # No data
+        self.data_saved = True
 
     def run(self):
         """Runs the gui - BLOCKING"""
@@ -226,10 +269,31 @@ class SpeedOfSoundGUI:
             tkmb.showerror("Failed to connect", f"Failed to connect to controller, check the connections, then try resetting the controller and this software.")
             raise exc
 
+    def ask_close(self):
+        # Check if any data needs saved
+        if self.data_saved:
+            self.root.destroy()
+            return
+        
+        # If data needs saved
+        response: bool|None = tkmb.askyesnocancel("Really close?", "Save before closing?")
+        # Cancel
+        if response is None:
+            return
+        # No
+        elif not response:
+            self.root.destroy()
+        # Yes
+        elif response:
+            self.save_data()
+            self.root.destroy()
+
 def run_gui():
     """Runs the interactive gui"""
     gui = SpeedOfSoundGUI()
     gui.run()
+
+    
 
 # Boilerplate to prevent gui from accidentally being called
 if __name__ == "__main__": 
